@@ -1,0 +1,112 @@
+## Get PCA results
+ret_pca=read.table("/sc/arion/projects/psychAD/data/share/cmu/plink.eigenvec")
+# This time comes from new.vcf.gz, the names are CMC names
+
+cov.mat = meta.data[, c('Cohort', 'ageOfDeath', 'Dx', 'Sex')]
+rownames(cov.mat) = meta.data$Individual_ID
+cov.mat$PC1_gt = ret_pca$V3[match(rownames(cov.mat), ret_pca$V1)]
+cov.mat$PC2_gt = ret_pca$V4[match(rownames(cov.mat), ret_pca$V1)]
+cov.mat$PC3_gt = ret_pca$V5[match(rownames(cov.mat), ret_pca$V1)]
+cov.mat = cov.mat[!is.na(cov.mat$PC1_gt), ]  # 777 samples
+# save(cov.mat, file = './data_store/cov_mat_new_with_3PC.RData')
+
+load('./data_store/cov_mat_new_with_3PC.RData')
+geno_cov = rbind(Cohort = as.numeric(cov.mat$Cohort) - 1, ageOfDeath = cov.mat$ageOfDeath, 
+                 Sex1 = as.numeric(cov.mat$Sex == 'XY'), Sex2 = as.numeric(cov.mat$Sex == 'XXY'), 
+                 Dx = as.numeric(cov.mat$Dx) - 1, Gt_pc1 = cov.mat$PC1_gt, Gt_pc2 = cov.mat$PC2_gt, 
+                 Gt_pc3 = cov.mat$PC3_gt)
+#colnames(geno_cov) = df.subject$Genotyping_Sample_ID[match(rownames(cov.mat), df.subject$Individual_ID)]
+geno_cov = data.frame(geno_cov)
+colnames(geno_cov) = rownames(cov.mat)
+geno_cov = cbind(id = rownames(geno_cov), geno_cov)
+
+# pheno_files <- list.files('/sc/arion/projects/psychAD/data/share/cmu/pseudobulk',pattern='*.bed.gz$',full.names = T)
+# pheno_files <- list.files('/sc/arion/projects/psychAD/data/share/cmu/sorted',pattern='*.bed.gz$',full.names = T)
+# pheno_files <- list.files('/sc/arion/projects/psychAD/data/share/cmu/bmind_small',pattern='*.bed.gz$',full.names = T)
+
+# geno_cov = geno_cov[-1, ] # for pseudobulk and sorted and bmind_small
+
+pheno_files <- list.files('/sc/arion/projects/psychAD/data/share/cmu/bulk_bmind/',pattern='*.bed.gz$',full.names = T)
+
+##### Add Expression PCs 
+get_covariates <- function(i, folder_name){
+  out_name <- basename(pheno_files[i]) %>% gsub('\\.bed\\.gz','',.) %>% paste0('.cov.txt')
+  #load expression data
+  d <- data.table::fread(pheno_files[i],data.table=FALSE)
+  #perform pca
+  pca <- d[-c(1,2,3,4)] %>% t() %>% prcomp(.,scale.=T)
+  #Create directories with different number of expression pcs
+  #Add the n first pcs to the covariate file and write the covariate file in fastqtl format
+  
+  # Start with no PCs
+  
+  # number_of_pcs <- c(5, 10, 20, 30, 40, 50)
+  number_of_pcs <- c(0, 5, 10, 15, 20)
+  number_of_pcs <- number_of_pcs[number_of_pcs < ncol(pca$x)]
+  
+  lapply(number_of_pcs, function(npc){
+    top_pcs <- pca$x[,1:npc] %>% t()
+    rownames(top_pcs) <- paste0(rownames(top_pcs),'_exp')
+    top_pcs <- top_pcs %>% as.data.frame() %>% rownames_to_column('id')
+    common.subjects = intersect(colnames(geno_cov), colnames(top_pcs))
+    if(npc == 0){
+      cov = geno_cov[, common.subjects]
+      if(!dir.exists(paste0(folder_name, npc))){
+        dir.create(paste0(folder_name, npc), showWarnings = FALSE)
+      }
+      write_tsv(cov, paste0(folder_name, npc, '/', out_name))
+    }else{
+      cov <- rbind(geno_cov[, common.subjects], top_pcs[, common.subjects])
+      if(!dir.exists(paste0(folder_name, npc))){
+        dir.create(paste0(folder_name, npc), showWarnings = FALSE)
+      }
+      write_tsv(cov, paste0(folder_name, npc, '/', out_name))
+    }
+  })
+}
+
+# lapply(1:length(pheno_files), get_covariates, folder_name='/sc/arion/projects/psychAD/data/share/cmu/pseudobulk/PC')
+# lapply(1:length(pheno_files), get_covariates, folder_name='/sc/arion/projects/psychAD/data/share/cmu/sorted/PC')
+# lapply(1:length(pheno_files), get_covariates, folder_name='/sc/arion/projects/psychAD/data/share/cmu/bmind_small/PC')
+
+lapply(1:length(pheno_files), get_covariates, folder_name='/sc/arion/projects/psychAD/data/share/cmu/bulk_bmind/PC')
+
+## For bMIND data, I have changed the sample names back to CMC
+load('match_subject_names.RData')
+load('./data_store/cov_mat_with_3PC.RData')
+geno_cov = rbind(Cohort = as.numeric(cov.mat$Cohort) - 1, ageOfDeath = cov.mat$ageOfDeath, 
+                 Sex1 = as.numeric(cov.mat$Sex == 'XY'), Sex2 = as.numeric(cov.mat$Sex == 'XXY'), 
+                 Dx = as.numeric(cov.mat$Dx) - 1, Gt_pc1 = cov.mat$PC1_gt, Gt_pc2 = cov.mat$PC2_gt, 
+                 Gt_pc3 = cov.mat$PC3_gt)
+#colnames(geno_cov) = df.subject$Genotyping_Sample_ID[match(rownames(cov.mat), df.subject$Individual_ID)]
+geno_cov = data.frame(geno_cov)
+colnames(geno_cov) = df.subject$Individual_ID[match(rownames(cov.mat), df.subject$Individual_ID)]
+
+geno_cov = cbind(id = rownames(geno_cov), geno_cov)
+
+pheno_files <- list.files('/sc/arion/projects/psychAD/data/share/cmu/bulk_bmind',pattern='*.bed.gz$',full.names = T)
+get_covariates <- function(i, folder_name){
+  out_name <- basename(pheno_files[i]) %>% gsub('\\.bed\\.gz','',.) %>% paste0('.cov.txt')
+  #load expression data
+  d <- data.table::fread(pheno_files[i],data.table=FALSE)
+  #perform pca
+  pca <- d[-c(1,2,3,4)] %>% t() %>% prcomp(.,scale.=T)
+  
+  #Create directories with different number of expression pcs
+  #Add the n first pcs to the covariate file and write the covariate file in fastqtl format
+  number_of_pcs <- c(5, 10, 15, 20, 30)
+  # number_of_pcs <- c(5)
+  number_of_pcs <- number_of_pcs[number_of_pcs < ncol(pca$x)]
+  
+  lapply(number_of_pcs, function(npc){
+    
+    top_pcs <- pca$x[,1:npc] %>% t()
+    rownames(top_pcs) <- paste0(rownames(top_pcs),'_exp')
+    top_pcs <- top_pcs %>% as.data.frame() %>% rownames_to_column('id')
+    
+    cov <- rbind(geno_cov[, colnames(top_pcs)], top_pcs)
+    dir.create(paste0(folder_name, npc), showWarnings = FALSE)
+    write_tsv(cov, paste0(folder_name, npc, '/', out_name))
+  })
+}
+lapply(1:length(pheno_files), get_covariates, folder_name='/sc/arion/projects/psychAD/data/share/cmu/bulk_bmind/PC')
