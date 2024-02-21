@@ -1,0 +1,124 @@
+cd /sc/arion/projects/psychAD/data/share/cmu/pseudobulk/
+source ~/.bashrc
+
+ml tabix/0.2.6
+ml Rmath/3.6.3
+ml eigen/3.3.7
+ml boost
+ml fastqtl
+
+for f in *.bed
+do
+bgzip $f && tabix -p bed $f.gz
+done
+
+#### For pseudobulk/
+for f in PC*
+do
+cd $f
+gzip *
+ln -s ../*.bed.gz .
+ln -s ../*.bed.gz.tbi .
+ln -s ../../new.vcf.gz .
+ln -s ../../new.vcf.gz.tbi .
+cd ..
+done
+
+for f in PC*
+do
+cd $f
+for bed in *.bed.gz
+do
+cell=`echo $bed | sed 's/.bed.gz//'`
+echo $cell
+fastQTL --vcf new.vcf.gz --bed $bed --permute 1000 --out $cell.quantile.txt.gz --normal --cov $cell.cov.txt.gz --commands 22 $cell.commands.22.tmp
+sed 's/^ //; s/$/ /' $cell.commands.22.tmp > $cell.commands.22.lsf
+rm $cell.commands.22.tmp
+done
+cd ..
+done
+
+
+
+#### For bMIND_full 
+# Separate genotype with chromosomes
+
+for chr in {1..22}
+do
+outfile=./genotype_by_chr/new.chr${chr}.vcf.gz
+bcftools view new.vcf.gz —regions ${chr} | gzip -f > $outfile && taxi -p vcf -f $outfile
+done
+
+for f in PC*
+do
+cd $f
+ln -s ../../genotype_by_chr/ .
+cd ..
+done
+
+
+for f in PC*
+do
+cd $f
+for bed in *.bed.gz
+do
+cell=`echo $bed | sed 's/.bed.gz//'`
+echo $cell
+for chr in {1..22}
+do
+fastQTL --vcf ./genotype_by_chr/new.chr${chr}.vcf.gz --bed $cell.bed.gz --permute 1000 --out $cell.quantile.txt.gz --normal --cov $cell.cov.txt.gz --commands 22 $cell.commands.22.tmp
+sed -n ${chr}p $cell.commands.22.tmp  > $cell.commands.chr$chr.lsf
+rm $cell.commands.22.tmp
+done
+cat $cell.commands.chr*.lsf > $cell.commands.22.lsf
+rm $cell.commands.chr*.lsf
+done
+echo $f
+cd ..
+done
+
+
+
+#### Continue with cell types ### 
+for f in PC*
+do
+cd $f
+for bed in *.bed.gz
+do
+cell=`echo $bed | sed 's/.bed.gz//'`
+echo $cell
+cat ../$cell.pre.command.tmp $cell.commands.22.lsf > $cell.commands.lsf
+bsub < $cell.commands.lsf
+done
+cd ..
+done
+
+for d in PC*
+do
+cd $d
+rm *quantile.txt.gz
+for f in *.commands.22.txt
+do
+sh $f
+done
+cd ..
+done
+
+for d in PC{0,5,10,15,20}
+do
+cd $d
+echo $d
+grep 'Running time' slurm-* | wc -l
+cd ..
+done
+
+
+
+# Clean
+# Remove tmp files
+for d in PC*
+do
+cd $d
+rm *quantile*
+cd ..
+done
