@@ -1,0 +1,171 @@
+source ~/.bashrc
+cd $eqtl_path
+
+
+ml Rmath/3.6.3
+ml eigen/3.3.7
+ml boost
+ml fastqtl
+
+mkdir -p 'PC5_nominal'
+cd PC5_nominal
+ln -s ../PC5/*.bed.gz .
+ln -s ../PC5/*.bed.gz.tbi .
+ln -s ../PC5/*.cov.txt.gz .
+ln -s ../PC5/new.vcf.gz .
+ln -s ../PC5/new.vcf.gz.tbi .
+
+
+# bulk_bmind
+mkdir -p ‘PC_nominal’
+cd PC5_nominal
+ln -s ../PC5/*.bed.gz .
+ln -s ../PC5/*.bed.gz.tbi .
+ln -s ../PC5/*cov.txt.gz .
+ln -s ../../new.vcf.gz .
+ln -s ../../new.vcf.gz.tbi .
+
+
+mkdir -p 'PC10_nominal'
+cd PC10_nominal
+ln -s ../PC10/*.bed.gz .
+ln -s ../PC10/*.bed.gz.tbi .
+ln -s ../PC10/*.cov.txt.gz .
+ln -s ../PC10/new.vcf.gz .
+ln -s ../PC10/new.vcf.gz.tbi .
+
+
+for bed in *.bed.gz
+do
+cell=`echo $bed | sed 's/.bed.gz//'`
+fastQTL --vcf new.vcf.gz --bed $bed --out $cell.quantile.txt.gz --normal --cov $cell.cov.txt.gz --commands 22 $cell.commands.22.tmp
+sed 's/^ //; s/$/ /' $cell.commands.22.tmp > $cell.commands.22.lsf
+rm $cell.commands.22.tmp
+done
+
+
+for bed in *.bed.gz
+do
+cell=`echo $bed | sed 's/.bed.gz//'`
+echo $cell
+cat ../$cell.pre.command.tmp $cell.commands.22.lsf > $cell.commands.lsf
+bsub < $cell.commands.lsf
+done
+
+
+
+# Now let’s gzip the association files and give them a nice name.
+cd $eqtl_path'/PC5_nominal'
+rm *quantile.txt.gz
+rm *.bed.gz
+rm *.bed.gz.tbi  
+rm *.cov.txt.gz
+rm *.commands.lsf
+rm *.vcf.gz
+rm *.vcf.gz.tbi
+
+for f in *.quantile.txt.gz.*
+do
+gzip $f
+x=`echo $f | sed 's/:.\+$/.gz/' | sed 's/.quantile.txt.gz//'`
+mv $f.gz $x
+done
+
+
+
+cd /PC5_indep
+ml tabix/0.2.6
+
+for f in *.qtltools.bed
+do
+bgzip $f && tabix -p bed $f.gz
+done
+
+
+ln -s ../../new.vcf.gz .
+ln -s ../../new.vcf.gz.tbi .
+ln -s ../PC5/*.cov.txt.gz  .
+
+
+source ~/.bashrc
+
+
+ml Rmath/3.6.3
+ml gsl/2.5
+ml eigen/3.3.7
+ml boost
+ml htslib/1.9
+ml zlib/1.2.11
+ml curl
+
+for bed in *qtltools.bed.gz
+do
+cell=`echo $bed | sed 's/.qtltools.bed.gz//'`
+for i in {0..22}
+do
+echo 'QTLtools cis --vcf new.vcf.gz --bed '$bed' --cov '$cell'.cov.txt.gz --permute 1000 --normal --chunk '$i' 22 --out '$cell'.conditional_permute_'$i'_22
+' >> $cell.commands.cond.permutation.22.txt
+done
+cat ../$cell.pre.command.tmp $cell.commands.cond.permutation.22.txt > $cell.commands.lsf
+echo $cell
+bsub < $cell.commands.lsf
+done
+
+
+for bed in *.qtltools.bed.gz
+do
+cell=`echo $bed | sed 's/.qtltools.bed.gz//'`
+cat $cell.conditional_permute_* >> $cell.conditional.permute.txt
+done
+rm *.conditional_permute_*
+
+for bed in *.qtltools.bed.gz
+do
+cell=`echo $bed | sed 's/.qtltools.bed.gz//'`
+cat $cell.conditional_permute_trail_* >> $cell.conditional_permute_22_22
+done
+#rm *.conditional_permute_trail_*
+
+
+
+ml R/4.2.0
+ln -s /sc/arion/projects/buxbaj01a/Xuran/test/qtltools_runFDR_cis.R
+
+for f in *.conditional.permute.txt
+do
+cell=`echo $f | sed 's/.conditional.permute.txt//'`
+Rscript qtltools_runFDR_cis.R $f 0.05 $cell.permutations_all
+done
+
+
+cd PC5_indep
+ml tabix/0.2.6
+source ~/.bashrc
+
+ml gsl/2.5
+ml htslib/1.9
+ml zlib/1.2.11
+ml curl
+ml Rmath/3.6.3
+ml eigen/3.3.7
+ml boost
+
+for f in *.qtltools.conditional.bed
+do
+bgzip $f && tabix -p bed $f.gz
+done
+
+# Conditional analysis
+
+
+for bed in *.qtltools.conditional.bed.gz
+do
+cell=`echo $bed | sed 's/.qtltools.conditional.bed.gz//'`
+echo 'QTLtools cis --vcf new.vcf.gz --bed '$bed' --cov '$cell'.cov.txt.gz --mapping '$cell'.permutations_all.thresholds.txt --normal --out '$cell'.conditional.txt' > $cell.commands.cond.lsf
+done
+
+for f in *.commands.cond.lsf
+do
+bsub < $f
+done
+
