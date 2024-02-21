@@ -1,7 +1,7 @@
 # TMM normalization of pseudo-bulk data
+
 BiocManager::install("rtracklayer")
 library(rtracklayer)
-
 gtf <- rtracklayer::import('./data_store/Homo_sapiens.GRCh38.96.gtf') %>% 
   as.data.frame() %>% 
   dplyr::filter(type=='gene') %>% 
@@ -24,8 +24,6 @@ load('new_data_store/match_subject_names.RData')
 library(tidyverse)
 library(SingleCellExperiment)
 library(parallel)
-
-# load in single-cell data
 sc.seu = readRDS('./new_data_store/sc_seurat_object.rds')
 sc.seu = sc.seu[, which(sc.seu$subject_cmc != '#N/A')]
 # Let's skip the function and repeat the procedure ourselves
@@ -346,47 +344,5 @@ for(cell in cells.bmind){
   
   # write_tsv(bed, path = paste0('./minerva_upload/bmind_small/', make.names(cell), '.bed'))
 }
-
-
-
-# Generate expression PCA 
-# first get other covariates fromt 
-load('new_data_store/cov_mat_with_3PC.RData')
-geno_cov = rbind(Cohort = as.numeric(cov.mat$Cohort) - 1, ageOfDeath = cov.mat$ageOfDeath, 
-                 Sex1 = as.numeric(cov.mat$Sex == 'XY'), Sex2 = as.numeric(cov.mat$Sex == 'XXY'), 
-                 Dx = as.numeric(cov.mat$Dx) - 1, Gt_pc1 = cov.mat$PC1_gt, Gt_pc2 = cov.mat$PC2_gt, 
-                 Gt_pc3 = cov.mat$PC3_gt)
-colnames(geno_cov) = rownames(cov.mat)
-# geno_cov = as_tibble(geno_cov)
-
-pheno_files <- list.files('minerva_upload/bulk_bmind',pattern='*.bed$',full.names = T)
-get_covariates <- function(i, folder_name){
-  
-  out_name <- basename(pheno_files[i]) %>% gsub('\\.bed','',.) %>% paste0('.cov.txt')
-  
-  #load expression data
-  d <- data.table::fread(pheno_files[i],data.table=FALSE)
-  #perform pca
-  pca <- d[-c(1,2,3,4)] %>% t() %>% prcomp(.,scale.=T)
-  
-  #Create directories with different number of expression pcs
-  #Add the n first pcs to the covariate file and write the covariate file in fastqtl format
-  number_of_pcs <- c(10,20,30,40,50,60,70,80,90,100)
-  
-  lapply(number_of_pcs, function(i){
-    
-    top_pcs <- pca$x[,1:i] %>% t()
-    rownames(top_pcs) <- paste0(rownames(top_pcs),'_exp')
-    top_pcs <- top_pcs %>% as.data.frame() %>% rownames_to_column('id')
-    
-    shared_samples <- intersect(colnames(geno_cov),colnames(top_pcs))
-    
-    cov <- rbind(geno_cov[, shared_samples], top_pcs[,shared_samples])
-    dir.create(paste0(folder_name,i),showWarnings = FALSE)
-    write_tsv(cov, paste0(folder_name,i,'/',out_name))
-  })
-}
-lapply(1:length(pheno_files), get_covariates, folder_name='minerva_upload/bulk_bMIND/PC')
-
 
 
